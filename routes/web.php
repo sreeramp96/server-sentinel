@@ -2,8 +2,6 @@
 
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\WebsiteController;
-use App\Models\Website;
-use App\Notifications\SiteDownNotification;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -23,16 +21,5 @@ Route::middleware('auth')->group(function () {
 
 Route::get('/websites/{website}/chart-data', [WebsiteController::class, 'chartData'])
     ->name('websites.chart-data');
-
-Route::get('/test-notification', function () {
-    $website = Website::first();
-    $check = $website->uptimeChecks()->latest()->first();
-
-    auth()->user()->notify(
-        new SiteDownNotification($website, $check)
-    );
-
-    return 'Notification sent — check Mailtrap!';
-})->middleware('auth');
 
 require __DIR__.'/auth.php';
