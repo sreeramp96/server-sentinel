@@ -21,10 +21,9 @@
 ---
 
 ## 📸 Screenshots
-
-*Add screenshots here to showcase your dashboard!*
-> [!TIP]
-> Use a tool like [CleanShot X](https://cleanshot.com/) or [Loom](https://www.loom.com/) to capture your beautiful Laravel 12 + Tailwind v4 UI.
+![Alt text](https://github.com/sreeramp96/server-sentinel/blob/main/public/screeshots/Screenshot%202026-03-16%20204742.png)
+![Alt text](https://github.com/sreeramp96/server-sentinel/blob/main/public/screeshots/Screenshot%202026-03-16%20204753.png)
+![Alt text](https://github.com/sreeramp96/server-sentinel/blob/main/public/screeshots/Screenshot%202026-03-16%20204811.png)
 
 ---
 
