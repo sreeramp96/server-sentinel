@@ -5,12 +5,27 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Support\Str;
 
 class Website extends Model
 {
-    protected $fillable = ['user_id', 'name', 'url', 'is_active'];
+    protected $fillable = [
+        'user_id',
+        'name',
+        'url',
+        'is_active',
+        'is_public',
+        'public_slug',
+    ];
 
-    protected $casts = ['is_active' => 'boolean', 'last_notified_at' => 'datetime'];
+    protected function casts(): array
+    {
+        return [
+            'is_active' => 'boolean',
+            'last_notified_at' => 'datetime',
+            'status_page_enabled' => 'boolean',
+        ];
+    }
 
     public function uptimeChecks(): HasMany
     {
@@ -20,6 +35,11 @@ class Website extends Model
     public function latestCheck(): HasOne
     {
         return $this->hasOne(UptimeCheck::class)->latestOfMany('checked_at');
+    }
+
+    public function incidents(): HasMany
+    {
+        return $this->hasMany(Incident::class)->orderByDesc('started_at');
     }
 
     // Returns 0–100 based on last 24 hours of checks
@@ -64,5 +84,10 @@ class Website extends Model
     {
         // Each check = 1 minute interval, so count of down checks ≈ minutes down
         return $this->uptimeChecks()->lastDay()->down()->count();
+    }
+
+    public function generatePublicSlug(): string
+    {
+        return Str::random(10);
     }
 }

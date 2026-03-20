@@ -15,10 +15,9 @@ class WebsiteController extends Controller
     {
         $websites = auth()->user()
             ->websites()                          // assumes User hasMany Website
-            ->with('latestCheck')                 // eager load — avoids N+1
+            ->with(['latestCheck', 'incidents' => fn($q) => $q->whereNull('resolved_at')])              // eager load — avoids N+1
             ->get();
 
-        // Attach stats to each website for the view
         $websites->each(function ($website) {
             $website->uptime_24h = $website->uptimePercentage(1);
             $website->uptime_7d = $website->uptimePercentage(7);
@@ -43,7 +42,6 @@ class WebsiteController extends Controller
 
     public function chartData(Website $website): JsonResponse
     {
-        // Authorise — users can only see their own sites
         abort_if($website->user_id !== auth()->id(), 403);
 
         $checks = $website->uptimeChecks()
@@ -58,5 +56,33 @@ class WebsiteController extends Controller
             'response_times' => $checks->map(fn ($c) => $c->response_time_ms),
             'statuses' => $checks->map(fn ($c) => $c->is_up),
         ]);
+    }
+
+    public function destroy(Website $website): RedirectResponse
+    {
+        abort_if($website->user_id !== auth()->id(), 403);
+
+        $website->delete();
+
+        return redirect()->route('dashboard')->with('success', 'Website removed.');
+    }
+
+    public function togglePublic(Website $website): RedirectResponse
+    {
+        abort_if($website->user_id !== auth()->id(), 403);
+
+        if (!$website->is_public) {
+            $website->update([
+                'is_public' => true,
+                'public_slug' => $website->public_slug ?? $website->generatePublicSlug(),
+            ]);
+        } else {
+            $website->update(['is_public' => false]);
+        }
+
+        return redirect()->route('dashboard')->with(
+            'success',
+            $website->is_public ? 'Status page enabled.' : 'Status page disabled.'
+        );
     }
 }

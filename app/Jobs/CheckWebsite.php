@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Models\Incident;
 use App\Models\UptimeCheck;
 use App\Models\Website;
 use App\Notifications\SiteDownNotification;
@@ -69,6 +70,30 @@ class CheckWebsite implements ShouldQueue
         $this->website->update(['is_active' => $isUp]);
 
         $this->maybeNotify($isUp, $check);
+    }
+
+    private function trackIncident(bool $isUp, ?string $failureReason): void
+    {
+        $openIncident = Incident::query()
+            ->where('website_id', $this->website->id)
+            ->whereNull('resolved_at')
+            ->latest('started_at')
+            ->first();
+
+        if (!$isUp && $openIncident === null) {
+            Incident::create([
+                'website_id' => $this->website->id,
+                'started_at' => now(),
+                'failure_reason' => $failureReason,
+            ]);
+        }
+
+        if ($isUp && $openIncident !== null) {
+            $openIncident->update([
+                'resolved_at' => now(),
+                'duration_minutes' => $openIncident->started_at->diffInMinutes(now()),
+            ]);
+        }
     }
 
     private function maybeNotify(bool $isUp, UptimeCheck $check): void

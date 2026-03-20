@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Models\Incident;
 use App\Models\UptimeCheck;
 use App\Models\User;
 use App\Models\Website;
@@ -31,6 +32,7 @@ class UptimeCheckSeeder extends Seeder
                 'name' => $data['name'],
                 'url' => $data['url'],
                 'is_active' => true,
+                    'is_public' => false,
             ]));
         }
 
@@ -39,6 +41,7 @@ class UptimeCheckSeeder extends Seeder
 
             // Delete existing dummy data for this site first
             $website->uptimeChecks()->delete();
+            $website->incidents()->delete();
 
             $baseMs = match ($website->name) {
                 'Production App' => 180,   // fast, healthy site
@@ -47,9 +50,16 @@ class UptimeCheckSeeder extends Seeder
                 default => 250,
             };
 
-            // Simulate a realistic outage window for staging
-            $outageStart = now()->subHours(6);
-            $outageEnd = now()->subHours(5)->subMinutes(23);
+            // Outage windows (within last 24h so the dashboard shows them)
+            $outages = match ($website->name) {
+                'Staging Server' => [
+                    ['start' => now()->subHours(6), 'end' => now()->subHours(5)->subMinutes(23)],
+                ],
+                'Marketing Site' => [
+                    ['start' => now()->subHours(14), 'end' => now()->subHours(13)->subMinutes(45)],
+                ],
+                default => [],
+            };
 
             $checks = [];
             $now = now();
@@ -57,9 +67,9 @@ class UptimeCheckSeeder extends Seeder
             for ($i = 1440; $i >= 0; $i--) {
                 $checkedAt = $now->copy()->subMinutes($i);
 
-                // Inject outage for Staging Server only
-                $inOutage = $website->name === 'Staging Server'
-                    && $checkedAt->between($outageStart, $outageEnd);
+                $inOutage = collect($outages)->contains(
+                    fn($o) => $checkedAt->between($o['start'], $o['end'])
+                );
 
                 // Add natural noise to response time (±30%)
                 $noise = rand(-30, 60);
@@ -75,9 +85,9 @@ class UptimeCheckSeeder extends Seeder
 
                 $checks[] = [
                     'website_id' => $website->id,
-                    'is_up' => $isUp,
+                    'is_up' => !$inOutage,
                     'response_time_ms' => $responseMs,
-                    'status_code' => $statusCode,
+                    'status_code' => $inOutage ? 503 : 200,
                     'failure_reason' => $inOutage ? 'HTTP 503' : null,
                     'checked_at' => $checkedAt,
                     'created_at' => $checkedAt,
@@ -90,10 +100,24 @@ class UptimeCheckSeeder extends Seeder
                 UptimeCheck::insert($chunk);
             }
 
-            // Sync is_active to last check result
+            // Seed incidents from the outage windows
+            foreach ($outages as $outage) {
+                $duration = (int) $outage['start']->diffInMinutes($outage['end']);
+
+                Incident::create([
+                    'website_id' => $website->id,
+                    'started_at' => $outage['start'],
+                    'resolved_at' => $outage['end'],
+                    'failure_reason' => 'HTTP 503',
+                    'duration_minutes' => $duration,
+                    'created_at' => $outage['start'],
+                    'updated_at' => $outage['end'],
+                ]);
+            }
+
             $website->update(['is_active' => true]);
 
-            $this->command->info("Seeded {$website->name}: 1440 checks");
+            $this->command->info("Seeded {$website->name}: 1440 checks, " . count($outages) . " incident(s)");
         });
     }
 }
