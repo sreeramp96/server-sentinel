@@ -11,5 +11,5 @@ Artisan::command('inspire', function () {
 
 Schedule::command('sites:check')->everyMinute()->withoutOverlapping()->runInBackground();
 Schedule::call(function () {
-        UptimeCheck::where('checked_at', '<', now()->subDays(30))->delete();
+    UptimeCheck::where('checked_at', '<', now()->subDays(30))->delete();
 })->daily();

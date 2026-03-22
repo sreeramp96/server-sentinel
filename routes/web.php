@@ -12,10 +12,10 @@ Route::get('/', function () {
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/dashboard', [WebsiteController::class, 'index'])->name('dashboard');
     Route::post('/websites', [WebsiteController::class, 'store'])->name('websites.store');
+    Route::delete('/websites/{website}', [WebsiteController::class, 'destroy'])->name('websites.destroy');
+    Route::patch('/websites/{website}/toggle-monitoring', [WebsiteController::class, 'toggleMonitoring'])->name('websites.toggleMonitoring');
+    Route::patch('/websites/{website}/toggle-public', [WebsiteController::class, 'togglePublic'])->name('websites.togglePublic');
 });
-
-Route::delete('/websites/{website}', [WebsiteController::class, 'destroy'])->name('websites.destroy');
-Route::patch('/websites/{website}/toggle-public', [WebsiteController::class, 'togglePublic'])->name('websites.togglePublic');
 
 Route::middleware('auth')->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');

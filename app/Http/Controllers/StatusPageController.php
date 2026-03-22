@@ -14,9 +14,9 @@ class StatusPageController extends Controller
             ->where('is_public', true)
             ->firstOrFail();
 
-        $website->uptime_24h    = $website->uptimePercentage(1);
-        $website->uptime_7d     = $website->uptimePercentage(7);
-        $website->avg_ms        = $website->avgResponseTime(1);
+        $website->uptime_24h = $website->uptimePercentage(1);
+        $website->uptime_7d = $website->uptimePercentage(7);
+        $website->avg_ms = $website->avgResponseTime(1);
         $website->downtime_mins = $website->downtimeMinutes();
 
         $recentChecks = $website->uptimeChecks()

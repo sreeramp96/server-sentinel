@@ -6,9 +6,11 @@ use App\Models\Incident;
 use App\Models\UptimeCheck;
 use App\Models\Website;
 use App\Notifications\SiteDownNotification;
+use App\Notifications\SiteRecoveredNotification;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Exception\RequestException;
+use GuzzleHttp\Exception\TooManyRedirectsException;
 use GuzzleHttp\TransferStats;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -19,12 +21,16 @@ class CheckWebsite implements ShouldQueue
 
     public int $tries = 1;       // don't retry — stale results are worse than no result
 
-    public int $timeout = 15;    // Guzzle timeout + job timeout
+    public int $timeout = 20;    // Guzzle timeout + job timeout
 
     public function __construct(public Website $website) {}
 
     public function handle(): void
     {
+        if (! $this->website->is_monitoring) {
+            return;
+        }
+
         $responseTimeMs = null;
         $statusCode = null;
         $failureReason = null;
@@ -34,10 +40,23 @@ class CheckWebsite implements ShouldQueue
             $client = new Client;
 
             $response = $client->get($this->website->url, [
-                'timeout' => 10,
-                'connect_timeout' => 5,
+                'timeout' => 15,
+                'connect_timeout' => 10,
                 'http_errors' => false,   // don't throw on 4xx/5xx — we want to record them
                 'verify' => false,   // skip SSL verification for now
+                // Follow redirects (handles 301/302 chains like x.com → twitter.com)
+                'allow_redirects' => [
+                    'max' => 5,
+                    'strict' => false,
+                    'referer' => false,
+                    'protocols' => ['http', 'https'],
+                    'track_redirects' => true,
+                ],
+                // Mimic a real browser — prevents bot-blocking by sites like x.com
+                'headers' => [
+                    'User-Agent' => 'Mozilla/5.0 (compatible; ServerSentinel/1.0; +https://github.com/server-sentinel)',
+                    'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                ],
                 'on_stats' => function (TransferStats $stats) use (&$responseTimeMs) {
                     $responseTimeMs = (int) ($stats->getTransferTime() * 1000);
                 },
@@ -50,15 +69,18 @@ class CheckWebsite implements ShouldQueue
                 $failureReason = "HTTP {$statusCode}";
             }
 
+        } catch (TooManyRedirectsException $e) {
+            $failureReason = 'Too many redirects';
         } catch (ConnectException $e) {
-            $failureReason = 'Connection failed: '.$e->getMessage();
+            // Shorten the verbose cURL message to something human-readable
+            $failureReason = $this->cleanConnectError($e->getMessage());
         } catch (RequestException $e) {
             $failureReason = 'Request failed: '.$e->getMessage();
         } catch (\Throwable $e) {
             $failureReason = 'Unknown error: '.$e->getMessage();
         }
 
-        $check = UptimeCheck::create([
+        UptimeCheck::create([
             'website_id' => $this->website->id,
             'is_up' => $isUp,
             'response_time_ms' => $responseTimeMs,
@@ -69,38 +91,84 @@ class CheckWebsite implements ShouldQueue
 
         $this->website->update(['is_active' => $isUp]);
 
-        $this->maybeNotify($isUp, $check);
+        $resolvedIncident = $this->handleIncident($isUp, $failureReason);
+
+        $this->maybeNotify($isUp, $resolvedIncident);
     }
 
-    private function trackIncident(bool $isUp, ?string $failureReason): void
+    /**
+     * Convert verbose cURL error messages into short human-readable strings.
+     * e.g. "cURL error 6: Could not resolve host: x.com (...)" → "DNS failure: x.com"
+     */
+    private function cleanConnectError(string $message): string
     {
-        $openIncident = Incident::query()
-            ->where('website_id', $this->website->id)
+        if (str_contains($message, 'Could not resolve host')) {
+            preg_match('/Could not resolve host: ([^\s(]+)/', $message, $matches);
+            $host = $matches[1] ?? 'unknown';
+
+            return "DNS failure: {$host}";
+        }
+
+        if (str_contains($message, 'Connection refused')) {
+            return 'Connection refused';
+        }
+
+        if (str_contains($message, 'timed out') || str_contains($message, 'Operation timed out')) {
+            return 'Connection timed out';
+        }
+
+        if (str_contains($message, 'SSL') || str_contains($message, 'certificate')) {
+            return 'SSL/certificate error';
+        }
+
+        // Fall back to first sentence only — strips the haxx.se URL noise
+        return str_contains($message, '(see')
+            ? trim(explode('(see', $message)[0])
+            : $message;
+    }
+
+    private function handleIncident(bool $isUp, ?string $failureReason): ?Incident
+    {
+        $openIncident = Incident::where('website_id', $this->website->id)
             ->whereNull('resolved_at')
             ->latest('started_at')
             ->first();
 
-        if (!$isUp && $openIncident === null) {
-            Incident::create([
-                'website_id' => $this->website->id,
-                'started_at' => now(),
-                'failure_reason' => $failureReason,
-            ]);
+        if (! $isUp) {
+            if ($openIncident === null) {
+                Incident::create([
+                    'website_id' => $this->website->id,
+                    'started_at' => now(),
+                    'failure_reason' => $failureReason,
+                ]);
+            }
+
+            return null;
         }
 
-        if ($isUp && $openIncident !== null) {
+        if ($openIncident !== null) {
             $openIncident->update([
                 'resolved_at' => now(),
-                'duration_minutes' => $openIncident->started_at->diffInMinutes(now()),
+                'duration_minutes' => (int) $openIncident->started_at->diffInMinutes(now()),
             ]);
+
+            return $openIncident->fresh();
         }
+
+        return null;
     }
 
-    private function maybeNotify(bool $isUp, UptimeCheck $check): void
+    private function maybeNotify(bool $isUp, ?Incident $resolvedIncident): void
     {
+        $owner = $this->website->user;
+
         if ($isUp) {
             // Site is up — reset last_notified_at so next outage triggers a fresh alert
             if ($this->website->last_notified_at !== null) {
+                if ($resolvedIncident !== null) {
+                    $owner->notify(new SiteRecoveredNotification($this->website, $resolvedIncident));
+                }
+
                 $this->website->update(['last_notified_at' => null]);
             }
 
@@ -112,8 +180,9 @@ class CheckWebsite implements ShouldQueue
             return; // already sent alert for this outage, stay quiet
         }
 
-        // Get the website owner and send the notification
-        $owner = $this->website->user;
+        $check = UptimeCheck::where('website_id', $this->website->id)
+            ->latest('checked_at')
+            ->first();
 
         $owner->notify(new SiteDownNotification($this->website, $check));
 

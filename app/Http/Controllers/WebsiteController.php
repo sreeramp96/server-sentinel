@@ -11,21 +11,28 @@ use Illuminate\View\View;
 
 class WebsiteController extends Controller
 {
-    public function index(): View
+    public function index(Request $request): View
     {
+        $period = (int) $request->get('period', 1);
+
+        // Clamp to allowed values only
+        if (! in_array($period, [1, 7, 30])) {
+            $period = 1;
+        }
+
         $websites = auth()->user()
             ->websites()                          // assumes User hasMany Website
-            ->with(['latestCheck', 'incidents' => fn($q) => $q->whereNull('resolved_at')])              // eager load — avoids N+1
+            ->with(['latestCheck', 'incidents' => fn ($q) => $q->whereNull('resolved_at')])              // eager load — avoids N+1
             ->get();
 
-        $websites->each(function ($website) {
+        $websites->each(function ($website) use ($period) {
+            $website->uptime_pct = $website->uptimePercentage($period);
             $website->uptime_24h = $website->uptimePercentage(1);
-            $website->uptime_7d = $website->uptimePercentage(7);
-            $website->avg_ms = $website->avgResponseTime(1);
+            $website->avg_ms = $website->avgResponseTime($period);
             $website->downtime_mins = $website->downtimeMinutes();
         });
 
-        return view('dashboard', compact('websites'));
+        return view('dashboard', compact('websites', 'period'));
     }
 
     public function store(Request $request): RedirectResponse
@@ -67,11 +74,24 @@ class WebsiteController extends Controller
         return redirect()->route('dashboard')->with('success', 'Website removed.');
     }
 
+    public function toggleMonitoring(Website $website): RedirectResponse
+    {
+        abort_if($website->user_id !== auth()->id(), 403);
+
+        $website->update(['is_monitoring' => ! $website->is_monitoring]);
+
+        $message = $website->is_monitoring
+            ? "Monitoring resumed for {$website->name}."
+            : "Monitoring paused for {$website->name}.";
+
+        return redirect()->route('dashboard')->with('success', $message);
+    }
+
     public function togglePublic(Website $website): RedirectResponse
     {
         abort_if($website->user_id !== auth()->id(), 403);
 
-        if (!$website->is_public) {
+        if (! $website->is_public) {
             $website->update([
                 'is_public' => true,
                 'public_slug' => $website->public_slug ?? $website->generatePublicSlug(),

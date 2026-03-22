@@ -21,7 +21,7 @@ return new class extends Migration
             $table->timestamps();
         });
 
-                Schema::table('websites', function (Blueprint $table) {
+        Schema::table('websites', function (Blueprint $table) {
             $table->boolean('is_public')->default(false)->after('is_active');
             $table->string('public_slug')->nullable()->unique()->after('is_public');
         });
@@ -33,7 +33,7 @@ return new class extends Migration
     public function down(): void
     {
         Schema::dropIfExists('incidents');
-                Schema::table('websites', function (Blueprint $table) {
+        Schema::table('websites', function (Blueprint $table) {
             $table->dropColumn(['is_public', 'public_slug']);
         });
     }

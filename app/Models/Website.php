@@ -14,6 +14,7 @@ class Website extends Model
         'name',
         'url',
         'is_active',
+        'is_monitoring',
         'is_public',
         'public_slug',
     ];
@@ -22,6 +23,8 @@ class Website extends Model
     {
         return [
             'is_active' => 'boolean',
+            'is_monitoring' => 'boolean',
+            'is_public' => 'boolean',
             'last_notified_at' => 'datetime',
             'status_page_enabled' => 'boolean',
         ];
