@@ -13,16 +13,15 @@ class WebsiteController extends Controller
 {
     public function index(Request $request): View
     {
-        $period = (int) $request->get('period', 1);
+        $period = (int) $request->input('period', 1);
 
-        // Clamp to allowed values only
         if (! in_array($period, [1, 7, 30])) {
             $period = 1;
         }
 
         $websites = auth()->user()
-            ->websites()                          // assumes User hasMany Website
-            ->with(['latestCheck', 'incidents' => fn ($q) => $q->whereNull('resolved_at')])              // eager load — avoids N+1
+            ->websites() // assumes User hasMany Website
+            ->with(['latestCheck', 'incidents' => fn($q) => $q->whereNull('resolved_at')]) // eager load — avoids N+1
             ->get();
 
         $websites->each(function ($website) use ($period) {
