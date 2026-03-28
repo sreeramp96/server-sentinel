@@ -22,3 +22,9 @@
 Homestead.json
 Homestead.yaml
 Thumbs.db
+.agents/
+.github/skills/
+.codex/
+boost.json
+AGENTS.md
+GEMINI.md

@@ -3,10 +3,12 @@
 namespace App\Http\Controllers;
 
 // use App\Models\Website;
+use App\Http\Requests\StoreWebsiteRequest;
 use App\Models\Website;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\View\View;
 
 class WebsiteController extends Controller
@@ -19,36 +21,36 @@ class WebsiteController extends Controller
             $period = 1;
         }
 
-        $websites = auth()->user()
-            ->websites() // assumes User hasMany Website
-            ->with(['latestCheck', 'incidents' => fn($q) => $q->whereNull('resolved_at')]) // eager load — avoids N+1
+        $websites = $request->user()
+            ->websites()
+            ->with(['latestCheck', 'incidents'])
+            ->withCount([
+                'uptimeChecks as total_checks_count' => fn ($q) => $q->lastDays($period),
+                'uptimeChecks as up_checks_count' => fn ($q) => $q->lastDays($period)->up(),
+                'uptimeChecks as total_24h_count' => fn ($q) => $q->lastDays(1),
+                'uptimeChecks as up_24h_count' => fn ($q) => $q->lastDays(1)->up(),
+                'uptimeChecks as downtime_mins_count' => fn ($q) => $q->lastDay()->down(),
+            ])
+            ->withAvg(['uptimeChecks as avg_ms_val' => fn ($q) => $q->lastDays($period)], 'response_time_ms')
             ->get();
 
-        $websites->each(function ($website) use ($period) {
-            $website->uptime_pct = $website->uptimePercentage($period);
-            $website->uptime_24h = $website->uptimePercentage(1);
-            $website->avg_ms = $website->avgResponseTime($period);
-            $website->downtime_mins = $website->downtimeMinutes();
-        });
+        $allIncidents = $websites->flatMap->incidents
+            ->sortByDesc('started_at')
+            ->take(20);
 
-        return view('dashboard', compact('websites', 'period'));
+        return view('dashboard', compact('websites', 'period', 'allIncidents'));
     }
 
-    public function store(Request $request): RedirectResponse
+    public function store(StoreWebsiteRequest $request): RedirectResponse
     {
-        $validated = $request->validate([
-            'name' => ['required', 'string', 'max:255'],
-            'url' => ['required', 'url', 'max:255'],
-        ]);
-
-        auth()->user()->websites()->create($validated);
+        $request->user()->websites()->create($request->validated());
 
         return redirect()->route('dashboard')->with('success', 'Site added.');
     }
 
     public function chartData(Website $website): JsonResponse
     {
-        abort_if($website->user_id !== auth()->id(), 403);
+        Gate::authorize('view', $website);
 
         $checks = $website->uptimeChecks()
             ->lastDay()
@@ -66,7 +68,7 @@ class WebsiteController extends Controller
 
     public function destroy(Website $website): RedirectResponse
     {
-        abort_if($website->user_id !== auth()->id(), 403);
+        Gate::authorize('delete', $website);
 
         $website->delete();
 
@@ -75,7 +77,7 @@ class WebsiteController extends Controller
 
     public function toggleMonitoring(Website $website): RedirectResponse
     {
-        abort_if($website->user_id !== auth()->id(), 403);
+        Gate::authorize('update', $website);
 
         $website->update(['is_monitoring' => ! $website->is_monitoring]);
 
@@ -88,7 +90,7 @@ class WebsiteController extends Controller
 
     public function togglePublic(Website $website): RedirectResponse
     {
-        abort_if($website->user_id !== auth()->id(), 403);
+        Gate::authorize('update', $website);
 
         if (! $website->is_public) {
             $website->update([

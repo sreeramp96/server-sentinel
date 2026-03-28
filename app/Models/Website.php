@@ -45,9 +45,41 @@ class Website extends Model
         return $this->hasMany(Incident::class)->orderByDesc('started_at');
     }
 
-    // Returns 0–100 based on last 24 hours of checks
+    public function getUptimePctAttribute(): float
+    {
+        if (! isset($this->total_checks_count) || $this->total_checks_count === 0) {
+            return 0.0;
+        }
+
+        return round(($this->up_checks_count / $this->total_checks_count) * 100, 2);
+    }
+
+    public function getUptime24hAttribute(): float
+    {
+        if (! isset($this->total_24h_count) || $this->total_24h_count === 0) {
+            return 0.0;
+        }
+
+        return round(($this->up_24h_count / $this->total_24h_count) * 100, 2);
+    }
+
+    public function getAvgMsAttribute(): int
+    {
+        return (int) ($this->avg_ms_val ?? 0);
+    }
+
+    public function getDowntimeMinsAttribute(): int
+    {
+        return (int) ($this->downtime_mins_count ?? 0);
+    }
+
+    // Returns 0–100 based on last X days of checks
     public function uptimePercentage(int $days = 1): float
     {
+        if ($days === 1 && isset($this->total_24h_count)) {
+            return $this->uptime_24h;
+        }
+
         $checks = $this->uptimeChecks()->lastDays($days)->get();
 
         if ($checks->isEmpty()) {

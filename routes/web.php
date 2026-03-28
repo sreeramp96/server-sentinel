@@ -3,7 +3,16 @@
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\StatusPageController;
 use App\Http\Controllers\WebsiteController;
+use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Session;
+
+Route::get('language/{locale}', function ($locale) {
+    App::setLocale($locale);
+    Session::put('locale', $locale);
+
+    return redirect()->back();
+});
 
 Route::get('/', function () {
     return view('welcome');

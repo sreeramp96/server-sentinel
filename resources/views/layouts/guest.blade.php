@@ -22,7 +22,7 @@
             <div class="relative z-10 flex flex-col items-center">
                 <a href="/" class="flex items-center gap-2 mb-6">
                     <x-application-logo class="w-12 h-12 text-indigo-600 dark:text-indigo-400" />
-                    <span class="font-bold text-2xl tracking-tight text-gray-900 dark:text-white">Server Sentinel</span>
+                    <span class="font-bold text-2xl tracking-tight text-gray-900 dark:text-white">{{__('Server Sentinel') }}</span>
                 </a>
             </div>
 

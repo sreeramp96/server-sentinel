@@ -7,13 +7,10 @@ use App\Models\UptimeCheck;
 use App\Models\Website;
 use App\Notifications\SiteDownNotification;
 use App\Notifications\SiteRecoveredNotification;
-use GuzzleHttp\Client;
-use GuzzleHttp\Exception\ConnectException;
-use GuzzleHttp\Exception\RequestException;
-use GuzzleHttp\Exception\TooManyRedirectsException;
 use GuzzleHttp\TransferStats;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\Http;
 
 class CheckWebsite implements ShouldQueue
 {
@@ -21,7 +18,7 @@ class CheckWebsite implements ShouldQueue
 
     public int $tries = 1;       // don't retry — stale results are worse than no result
 
-    public int $timeout = 20;    // Guzzle timeout + job timeout
+    public int $timeout = 20;    // Job timeout
 
     public function __construct(public Website $website) {}
 
@@ -37,44 +34,37 @@ class CheckWebsite implements ShouldQueue
         $isUp = false;
 
         try {
-            $client = new Client;
-
-            $response = $client->get($this->website->url, [
-                'timeout' => 15,
-                'connect_timeout' => 10,
-                'http_errors' => false,   // don't throw on 4xx/5xx — we want to record them
-                'verify' => false,   // skip SSL verification for now
-                // Follow redirects (handles 301/302 chains like x.com → twitter.com)
-                'allow_redirects' => [
-                    'max' => 5,
-                    'strict' => false,
-                    'referer' => false,
-                    'protocols' => ['http', 'https'],
-                    'track_redirects' => true,
-                ],
-                // Mimic a real browser — prevents bot-blocking by sites like x.com
-                'headers' => [
+            $response = Http::timeout(15)
+                ->connectTimeout(10)
+                ->withOptions([
+                    'verify' => false,
+                    'allow_redirects' => [
+                        'max' => 5,
+                        'strict' => false,
+                        'referer' => false,
+                        'protocols' => ['http', 'https'],
+                        'track_redirects' => true,
+                    ],
+                    'on_stats' => function (TransferStats $stats) use (&$responseTimeMs) {
+                        $responseTimeMs = (int) ($stats->getTransferTime() * 1000);
+                    },
+                ])
+                ->withHeaders([
                     'User-Agent' => 'Mozilla/5.0 (compatible; ServerSentinel/1.0; +https://github.com/server-sentinel)',
                     'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                ],
-                'on_stats' => function (TransferStats $stats) use (&$responseTimeMs) {
-                    $responseTimeMs = (int) ($stats->getTransferTime() * 1000);
-                },
-            ]);
+                ])
+                ->get($this->website->url);
 
-            $statusCode = $response->getStatusCode();
-            $isUp = $statusCode >= 200 && $statusCode < 400;
+            $statusCode = $response->status();
+            $isUp = $response->successful() || $response->redirect();
 
             if (! $isUp) {
                 $failureReason = "HTTP {$statusCode}";
             }
 
-        } catch (TooManyRedirectsException $e) {
-            $failureReason = 'Too many redirects';
-        } catch (ConnectException $e) {
-            // Shorten the verbose cURL message to something human-readable
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
             $failureReason = $this->cleanConnectError($e->getMessage());
-        } catch (RequestException $e) {
+        } catch (\Illuminate\Http\Client\RequestException $e) {
             $failureReason = 'Request failed: '.$e->getMessage();
         } catch (\Throwable $e) {
             $failureReason = 'Unknown error: '.$e->getMessage();

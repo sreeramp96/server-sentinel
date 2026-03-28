@@ -17,7 +17,7 @@ return new class extends Migration
             $table->string('name');
             $table->string('url');
             $table->boolean('is_active')->default(true)->index(); // Indexed for fast dispatching
-            $table->boolean('is_monitoring')->default(true)->after('is_active');
+            $table->boolean('is_monitoring')->default(true);
             $table->timestamps();
         });
     }
